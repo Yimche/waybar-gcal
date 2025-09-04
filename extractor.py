@@ -1,3 +1,5 @@
+#!./venv/bin/python
+
 import datetime
 import os.path
 
@@ -101,6 +103,8 @@ def main():
         return
 
     events = [e for e in events if "Survey" not in e["summary"]]
+    events = [e for e in events if "2100" not in e["summary"]]
+    events = [e for e in events if "Quiz" and "opens" not in e["summary"]]
 
     now = datetime.datetime.now().astimezone()  # local time
     
@@ -112,15 +116,23 @@ def main():
             start_dt = datetime.datetime.fromisoformat(start_str.replace("Z", "+00:00"))
             local_dt = start_dt.astimezone()
         else:  # all-day event
-            local_dt = datetime.datetime.fromisoformat(start_str)
+            local_dt = datetime.datetime.fromisoformat(start_str).astimezone()
         event_list.append((local_dt, e))
     
+
     # Sort by local datetime
-    event_list.sort(key=lambda x: x[0])
+    # event_list.sort(key=lambda x: x[1]["start"].get("dateTime", x[1]["start"].get("date")))
+    event_list.sort(key=lambda x:x[0])
     
     # Remove old events file
     if os.path.exists("events.txt"):
         os.remove("events.txt")
+    
+    if event_list == []:
+        with open("events.txt", "a") as f:
+            f.write("No Assignments!" + "\n")
+        exit()
+        
     
     # Print sorted events
     for local_dt, event in event_list:

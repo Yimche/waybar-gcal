@@ -1,7 +1,13 @@
 #!/bin/bash
 IFS=$''
+cd "$(dirname "$0")"
 
-events_file="$HOME/.config/waybar/scripts/waybar-gcal/events.txt"
+if [[ $1 == "update" ]]; then
+    source "./venv/bin/activate"
+    print=$(python extractor.py)
+fi
+
+events_file="events.txt"
 count=0
 
 while read -r line; do
@@ -11,8 +17,10 @@ done <"$events_file"
 
 # echo -n f"COUNT: {$count}\n"
 if [[ $count -gt 0 ]]; then
-    rng=$RANDOM
-    (("rng %= $count"))
+    # rng=$RANDOM
+    # (("rng %= $count"))
+
+    rng=0
 
     for ((i = 0; i < count; i++)); do
         if (( i != rng )); then
