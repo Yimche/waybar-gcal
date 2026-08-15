@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.exceptions import RefreshError
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
@@ -91,70 +92,97 @@ def sort_events(events):
     """
     Sorts list of events
     @param events_list: Events list
-    @returns: Sorted events list
+    @returns: Sorted list of (local_dt, all_day, event) tuples
     """
 
     events_list = []
 
     for e in events:
         start_str = e["start"].get("dateTime", e["start"].get("date"))
-        if "T" in start_str:  # timestamp with time
+        all_day = "T" not in start_str
+        if all_day:  # date only, starts at local midnight
+            local_dt = datetime.datetime.fromisoformat(start_str).astimezone()
+        else:  # timestamp with time
             start_dt = datetime.datetime.fromisoformat(start_str.replace(
                 "Z", "+00:00")
             )
             local_dt = start_dt.astimezone()
-        else:  # all-day event
-            local_dt = datetime.datetime.fromisoformat(start_str).astimezone()
-        events_list.append((local_dt, e))
+        events_list.append((local_dt, all_day, e))
 
     # Sort by local datetime
     events_list.sort(key=lambda x: x[0])
     return events_list
 
 
+def due_text(local_dt, now):
+    """
+    Describes how far away an event is in calendar days, not elapsed time.
+    @param local_dt: Event start, as a local-timezone datetime
+    @param now: Current local-timezone datetime
+    @returns: Human readable "Due ..." string
+    """
+
+    days_remaining = (local_dt.date() - now.date()).days
+
+    if days_remaining < 0:
+        return "Overdue"
+    if days_remaining == 0:
+        return "Due today"
+    if days_remaining == 1:
+        return "Due tomorrow"
+    return f"Due in {days_remaining:02d} days"
+
+
 def main():
-    creds = None
     # The file token.json stores the user's access and refresh tokens, and is
     # created automatically when the authorization flow completes for the first
     # time.
-    if os.path.exists("token.json"):
-        creds = Credentials.from_authorized_user_file("token.json", SCOPES)
-    # If there are no (valid) credentials available, let the user log in.
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                "credentials.json", SCOPES
-            )
-            creds = flow.run_local_server(port=0)
+    try:
+        creds = None
+        if os.path.exists("token.json"):
+            creds = Credentials.from_authorized_user_file("token.json", SCOPES)
+        # If there are no (valid) credentials available, let the user log in.
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    "credentials.json", SCOPES
+                )
+                creds = flow.run_local_server(port=0)
         # Save the credentials for the next run
         with open("token.json", "w") as token:
             token.write(creds.to_json())
-
-    try:
         cal_service = build("calendar", "v3", credentials=creds)
+
         # list_cal(cal_service)
 
         # task_service = build("tasks", "v1", credentials=creds)
         # list_tasklist(task_service)
 
         events = []
-        events = events + get_events(cal_service, 'WATTLE')
-        events = events + get_events(cal_service, 'CANVAS')
-        events = events + get_events(cal_service, 'MANUAL')
 
-        if not events:
-            print("No upcoming events found.")
-            return
+        calendars = [
+                'WATTLE',
+                'CANVAS',
+                'MANUAL',
+                ]
+
+        for calendar in calendars:
+            events = events + get_events(cal_service, calendar)
 
         events = [e for e in events if "Survey" not in e["summary"]]
         events = [e for e in events if "2100" not in e["summary"]]
+        events = [e for e in events if "END" not in e["summary"]]
         events = [e for e in events if "Quiz" and "opens" not in e["summary"]]
+        events = [e for e in events if "Lab test Week 12 - CODE + CONCEPT submission" not in e["summary"]]
+        events = [e for e in events if "OFFLINE REFERENCE MATERIALS" not in e["summary"]]
 
         events_list = sort_events(events)
 
         if events_list == []:
+            if os.path.exists("events.txt"):
+                os.remove("events.txt")
             with open("events.txt", "a") as f:
                 f.write("No Assignments!" + "\n")
         else:
@@ -164,24 +192,20 @@ def main():
             if os.path.exists("events.txt"):
                 os.remove("events.txt")
 
-            # Print sorted events
-            for local_dt, event in events_list:
-                delta = local_dt - now
-                days_remaining = delta.days
-                if days_remaining == 0:
-                    days_text = "Due today"
-                elif days_remaining == 1:
-                    days_text = "Due tomorrow"
-                elif days_remaining <= 9:
-                    days_text = f"Due in 0{days_remaining} days"
-                else:
-                    days_text = f"Due in {days_remaining} days"
+            PREFIX_WIDTH = 25
 
-                line = (
-                        f"{days_text} ({local_dt.strftime('%H:%M')})"
-                        f" - "
-                        f"{event['summary']}"
-                        )
+            # Print sorted events
+            for local_dt, all_day, event in events_list:
+                days_text = due_text(local_dt, now)
+                time_text = "all day" if all_day else local_dt.strftime("%H:%M")
+
+                summary = event["summary"]
+                if len(summary) > 42:
+                    summary = summary[:41] + "…"
+
+                prefix = f"{days_text} ({time_text})"
+                line = f"{prefix:<{PREFIX_WIDTH}}{summary}"
+
                 print(line)
                 with open("events.txt", "a") as f:
                     f.write(line + "\n")
@@ -189,6 +213,8 @@ def main():
     except HttpError as error:
         print(f"An error occurred: {error}")
 
+    except RefreshError as error:
+        print(f"Token has expired: {error}")
 
 if __name__ == "__main__":
     main()

@@ -4,7 +4,10 @@ cd "$(dirname "$0")"
 
 if [[ $1 == "update" ]]; then
     source "./venv/bin/activate"
-    print=$(python extractor.py)
+    output=$(python extractor.py)
+    if [[ $output == *"Token has expired"* ]]; then
+        notify-send "Gcal Extractor Failed" "$output"
+    fi
 fi
 
 events_file="events.txt"
@@ -31,7 +34,7 @@ if [[ $count -gt 0 ]]; then
         fi
     done
     echo -n $(jq --unbuffered --compact-output --args --arg \
-        title "${events[$rng]}" --args --arg tooltip "${tooltip}"\
+        title "$(sed 's/  */ /g' <<< "${events[$rng]}")" --args --arg tooltip "${tooltip}"\
         -n '{text: $title, class: "todo", tooltip: $tooltip}' \
     )
 else
@@ -40,4 +43,3 @@ else
         -n '{text: $title, class: "done"}' \
     )
 fi
-
